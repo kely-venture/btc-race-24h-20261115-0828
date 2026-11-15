@@ -53,7 +53,6 @@ let barsSeen = 0;
 let lastOrderBar = -1_000_000;
 let lastTradeBar = -1_000_000;
 let entryPrice: bigint | null = null;
-let prevClose: bigint | null = null;
 
 // The average price actually paid for the open position, recovered from the
 // position's cost basis (fees included) and the symbol's scales.
@@ -84,12 +83,6 @@ await runBars({
     anchorCount += 1n;
     barsSeen += 1;
 
-    // Stabilisation filter for entries: only buy the dip once the current
-    // bar has stopped printing lower — never buy into a bar that is still
-    // falling minute over minute (the fill lands at the next open anyway).
-    const prev = prevClose;
-    prevClose = close;
-
     const pos = state.positions.get(SYMBOL);
     const heldQty = pos === undefined ? 0n : pos.qty;
 
@@ -107,11 +100,9 @@ await runBars({
 
     if (heldQty === 0n) {
       if (barsSeen - lastTradeBar < COOLDOWN_BARS) return [];
-      // Deep flush below the fast mean, and below the session anchor,
-      // with the bar no longer falling.
+      // Deep flush below the fast mean, and below the session anchor.
       const dipBps = ((trailMean - close) * BPS) / trailMean;
-      const stabilised = prev === null || close >= prev;
-      if (dipBps >= DIP_BPS && close < anchor && stabilised && state.cash >= MIN_NOTIONAL) {
+      if (dipBps >= DIP_BPS && close < anchor && state.cash >= MIN_NOTIONAL) {
         lastOrderBar = barsSeen;
         lastTradeBar = barsSeen;
         return [
