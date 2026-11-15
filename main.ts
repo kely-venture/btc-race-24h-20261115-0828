@@ -13,10 +13,10 @@
 //     relative to its own anchor. A 10-bar cooldown after every trade keeps
 //     the round-trip fee (~26 bps) from being paid on noise.
 //   * SELL the whole position when the close reaches the filled entry price
-//     plus 150 bps (take profit) or falls to the entry price minus 250 bps
+//     plus 140 bps (take profit) or falls to the entry price minus 250 bps
 //     (hard stop). The entry price is read back from the filled position's
-//     cost basis, so the targets are measured against the price actually paid,
-//     not the price seen at decision time.
+//     cost basis less the fee, so the targets are measured against the price
+//     actually paid, not the fee-inflated cost.
 //   * Nothing is ever sold short, no leverage, at most one open position.
 //     Orders that would fill on the last batch are simply rejected by the
 //     harness (after_end) and cost nothing.
@@ -38,7 +38,7 @@ const BPS = 10_000n;
 const TRAIL_BARS = 60;
 const WARMUP_BARS = 120;
 const DIP_BPS = 150n;
-const TAKE_PROFIT_BPS = 150n;
+const TAKE_PROFIT_BPS = 140n;
 const STOP_BPS = 250n;
 const COOLDOWN_BARS = 10;
 const MAX_SLIPPAGE_BPS = 300;
@@ -55,13 +55,17 @@ let lastTradeBar = -1_000_000;
 let entryPrice: bigint | null = null;
 
 // The average price actually paid for the open position, recovered from the
-// position's cost basis (fees included) and the symbol's scales.
+// position's cost basis. Cost is the cash spent including the fee, so the
+// spend that actually bought the asset is cost less the fee — that is the
+// price the fills paid, and the price the exits are measured against.
 function impliedEntryPrice(state: BarsState): bigint | null {
   const pos = state.positions.get(SYMBOL);
   if (pos === undefined || pos.qty === 0n) return null;
   const sym = state.symbols.get(SYMBOL);
   if (sym === undefined) return null;
-  const numerator = pos.cost * 10n ** BigInt(sym.qty_scale + sym.price_scale);
+  const feeBps = BigInt(state.hello.fees.fee_bps);
+  const spend = (pos.cost * (BPS - feeBps)) / BPS;
+  const numerator = spend * 10n ** BigInt(sym.qty_scale + sym.price_scale);
   const denominator = pos.qty * 10n ** BigInt(state.hello.capital.quote_scale);
   if (denominator === 0n) return null;
   return numerator / denominator;
